@@ -1,0 +1,264 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  STAFF
+  MANAGEMENT
+}
+
+enum EventStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum BookingStatus {
+  PENDING_APPROVAL
+  CONFIRMED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum CreditTxType {
+  CREDIT
+  DEBIT
+}
+
+enum AnnouncementCategory {
+  URGENT
+  EVENT
+  GENERAL
+}
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  identifier   String          @unique // Reg No (e.g. 9923008152) or Staff ID
+  name         String
+  passwordHash String?
+  role         Role            @default(STUDENT)
+  department   String
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  studentProfile StudentProfile?
+  staffProfile   StaffProfile?
+  eventsCreated  Event[]         @relation("StaffEvents")
+  registrations  EventRegistration[]
+  creditAccount  CreditAccount?
+  approvalsGiven EventApproval[] @relation("ReviewerApprovals")
+  auditLogs      AuditLog[]
+
+  @@index([identifier])
+  @@index([role])
+}
+
+model StudentProfile {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  registerNumber      String   @unique
+  aadharNumber        String
+  degree              String   @default("B.Tech. / Information Technology")
+  batch               String   @default("2023")
+  section             String   @default("C")
+  abcId               String   @default("773082314321")
+  facultyAdvisor      String   @default("Dr. S. Hemaswathi (7373000708)")
+  dob                 String   @default("15/05/2006")
+  gender              String   @default("Male")
+  nationalityReligion String   @default("Indian / Islam / BC-Muslim")
+  address             String   @default("27, ramasamy street, muthoorani, karaikudi, Sivagangai, Tamilnadu, India - 630001")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model StaffProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  staffId     String   @unique
+  designation String   @default("Assistant Professor")
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Event {
+  id                      String            @id @default(uuid())
+  title                   String
+  type                    String            // PRBM Statement, Attendance, Marks, Timings, Hackathon, Workshop, Seminar
+  description             String            @db.Text
+  date                    String            // YYYY-MM-DD
+  time                    String            // 09:00 AM - 04:00 PM
+  venue                   String
+  deadline                String
+  capacity                Int               @default(60)
+  registeredCount         Int               @default(0)
+  fee                     Decimal           @default(0.0) @db.Decimal(10, 2)
+  creditRequirement       Int               @default(0)
+  creditsAwarded          Int               @default(1)
+  supportingDocsUrl       String?
+  status                  EventStatus       @default(PENDING)
+  managementComments      String?           @db.Text
+  published               Boolean           @default(false)
+  isCompleted             Boolean           @default(false)
+  completionDate          String?
+  requiresStudentApproval Boolean           @default(false)
+
+  staffId                 String
+  staff                   User              @relation("StaffEvents", fields: [staffId], references: [id])
+
+  approvals               EventApproval[]
+  registrations           EventRegistration[]
+  certificates            Certificate[]
+
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  @@index([status])
+  @@index([published])
+  @@index([staffId])
+}
+
+model EventApproval {
+  id          String      @id @default(uuid())
+  eventId     String
+  event       Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    User        @relation("ReviewerApprovals", fields: [reviewerId], references: [id])
+  status      EventStatus
+  remarks     String?     @db.Text
+  reviewedAt  DateTime    @default(now())
+
+  @@index([eventId])
+  @@index([reviewerId])
+}
+
+model EventRegistration {
+  id               String         @id @default(uuid())
+  eventId          String
+  event            Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  studentId        String
+  student          User           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  bookingStatus    BookingStatus  @default(CONFIRMED)
+  paymentStatus    String         @default("Free") // Paid, Credits Deducted, Free
+  amountPaid       String?
+  passCode         String         @unique
+  registeredAt     DateTime       @default(now())
+
+  attendance       Attendance?
+  paymentRecord    Payment?
+  bookingApproval  BookingApproval?
+
+  @@unique([eventId, studentId])
+  @@index([eventId])
+  @@index([studentId])
+}
+
+model BookingApproval {
+  id             String            @id @default(uuid())
+  registrationId String            @unique
+  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  reviewedBy     String?
+  remarks        String?
+  status         String            @default("PENDING") // PENDING, APPROVED, REJECTED
+  updatedAt      DateTime          @updatedAt
+}
+
+model CreditAccount {
+  id             String              @id @default(uuid())
+  studentId      String              @unique
+  student        User                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  currentBalance Int                 @default(50)
+  transactions   CreditTransaction[]
+  updatedAt      DateTime            @updatedAt
+}
+
+model CreditTransaction {
+  id          String        @id @default(uuid())
+  accountId   String
+  account     CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  amount      Int
+  type        CreditTxType
+  description String
+  eventId     String?
+  timestamp   DateTime      @default(now())
+
+  @@index([accountId])
+}
+
+model Payment {
+  id             String            @id @default(uuid())
+  registrationId String            @unique
+  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  amount         Decimal           @db.Decimal(10, 2)
+  currency       String            @default("INR")
+  status         PaymentStatus     @default(COMPLETED)
+  provider       String            @default("DEMO_GATEWAY")
+  transactionRef String            @unique
+  createdAt      DateTime          @default(now())
+}
+
+model Attendance {
+  id             String            @id @default(uuid())
+  registrationId String            @unique
+  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  attended       Boolean           @default(false)
+  markedAt       DateTime?
+  markedBy       String?
+}
+
+model Announcement {
+  id        String               @id @default(uuid())
+  title     String
+  content   String               @db.Text
+  category  AnnouncementCategory @default(GENERAL)
+  author    String
+  createdAt DateTime             @default(now())
+}
+
+model Certificate {
+  id             String   @id @default(uuid())
+  verificationId String   @unique
+  eventId        String
+  event          Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  studentId      String
+  studentName    String
+  registerNumber String
+  issueDate      String
+  department     String
+  gradeOrRemarks String
+  createdAt      DateTime @default(now())
+
+  @@index([verificationId])
+  @@index([eventId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String
+  actorRole Role
+  details   String   @db.Text
+  timestamp DateTime @default(now())
+
+  @@index([actorId])
+  @@index([timestamp])
+}
